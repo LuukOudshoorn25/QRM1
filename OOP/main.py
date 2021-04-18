@@ -215,11 +215,11 @@ class VaR_Predictor():
         return predictions
 
 
-    def __CCC__(self, estimation_period=2*252, exclude_stressed=False):
-        """Constant Correlation method.
-            Estimate GARCH(1,1) for each asset, estimate correlation matrix and obtain covariance matrix by using
-            volatilities sigma from GARCH and correlations from fixed correlation matrix
-            Filtered historic simulation with EWMA"""
+    def __DCCC__(self, estimation_period=2*252, exclude_stressed=False):
+        """Dynamic Constant Correlation method.
+           Estimate GARCH(1,1) for each asset, estimate correlation matrix and obtain covariance matrix by using
+           volatilities sigma from GARCH and correlations from fixed correlation matrix
+           Filtered historic simulation with EWMA"""
         predictions = pd.DataFrame({'VaR01' :np.zeros(len(self.returns))*np.nan,
                                     'VaR025':np.zeros(len(self.returns))*np.nan,
                                     'ES01'  :np.zeros(len(self.returns))*np.nan,
@@ -245,7 +245,7 @@ class VaR_Predictor():
                 am = arch_model(ret, p=1,q=1)
                 res = am.fit(update_freq=0,)
                 # Get conditional volatilities
-                volas = res.conditional_volatility/(10**(2*C))
+                volas = res.conditional_volatility
                 # Estimate empirical distribution of zt
                 zt = (ret-ret.mean()) / volas
                 residuals.loc[dates,asset] = zt
@@ -255,15 +255,15 @@ class VaR_Predictor():
             cons_corrmat = residuals.corr()
 
             # Predict volatility for the next day
-            sigma_pred = np.sqrt(res.params['omega'] + res.params['alpha[1]']*subreturns.iloc[-1]**2 + res.params['beta[1]']*volatilities.iloc[-1]**2)/1e4
+            sigma_pred = np.sqrt(res.params['omega'] + res.params['alpha[1]']*(10**3)*subreturns.iloc[-1]**2 + res.params['beta[1]']*volatilities.iloc[-1]**2)/10**C
             # Estimate covariance matrix
             CCC_covmat = corr_to_cov(cons_corrmat, sigma_pred)
             
             # Now we use variance-covariance method to estimate VaR and ES
             portfolio_variance = self.__portfolio_variance__(CCC_covmat)
-            VaR01  = np.sqrt(portfolio_variance) * norm.ppf(1-0.01) + np.dot(self.weights, self.returns.mean())
-            VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025) + np.dot(self.weights, returns.mean())
-            ES01   = np.sqrt(portfolio_variance) * 1/0.01 * norm.pdf(norm.ppf(0.01)) + np.dot(self.weights, self.returns.mean())
+            VaR01  = np.sqrt(portfolio_variance) * norm.ppf(1-0.01) - np.dot(self.weights, self.returns.mean())
+            VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025) - np.dot(self.weights, returns.mean())
+            ES01   = np.sqrt(portfolio_variance) * 1/0.01 * norm.pdf(norm.ppf(0.01)) - np.dot(self.weights, self.returns.mean())
             # Prediction data
             pred_date = self.returns.iloc[iloc1+estimation_period:iloc1+estimation_period+1].index[-1]
             predictions.loc[pred_date] = [VaR01,VaR025,ES01]
@@ -297,11 +297,11 @@ class VaR_Predictor():
         #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
         #output['VarCovar theta including stressed'] = self.__var_covar__(theta=0.04)
         #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
-        output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
-        output['Historic simulation'] = self.__historic_simulation__()
-        output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
-        output['FHS'] = self.__FHS__()
-        output['Constant correlation method'] = self.__CCC__(exclude_stressed=False)
+        #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        #output['Historic simulation'] = self.__historic_simulation__()
+        #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
+        #output['FHS'] = self.__FHS__()
+        #output['Dynamic Constant correlation method'] = self.__DCCC__(exclude_stressed=False)
 
         #plt.plot(output['VarCovar Normal Covmat including stressed']['VaR01'],lw=1)
         #plt.plot(output['VarCovar Normal Covmat excluding stressed']['VaR01'],lw=1)
