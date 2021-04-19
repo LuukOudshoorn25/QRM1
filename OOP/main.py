@@ -67,7 +67,8 @@ DC = dataconversion()
 returns = DC.to_log_ret(df)
 stocks = returns.columns
 # Make QQ plot
-#qq_plot(returns)
+#qq_plot(returns, dist='normal')
+#qq_plot(returns, dist='t',nu=4.5)
 # Make CDF plots
 #CDFs(returns)
 
@@ -81,7 +82,7 @@ class VaR_Predictor():
         self.returns = returns
         self.stocks  = returns.columns
         self.stressed = self.__stressed_periods()
-        self.weights = np.array([1,0,0,0,0,0])#np.ones(6)/6
+        self.weights = np.ones(6)/6
 
     def __portfolio_returns__(self,weights = np.ones(6)/6):
         """Get returns of the portfolio instead of individual assets"""
@@ -105,8 +106,7 @@ class VaR_Predictor():
         # Return dates where we are in a stressed period
         return stressed.index[stressed]
 
-
-    def __var_covar__(self,exclude_stressed=False,estimation_period=2*252,covariance_method='LediotWolf',theta=0.04):
+    def __var_covar__(self,exclude_stressed=False,estimation_period=2*252,covariance_method='LediotWolf',theta=0.96,studentt_dof = None):
         """Apply variance covariance matrix method, with given
            estimation period (standard equal to 2 years) and 
            boolean operator to include / exclude stressed periods
@@ -138,12 +138,18 @@ class VaR_Predictor():
                 # Get VaRs and ES estimates for the next day, (so semi-unconditional)
                 portfolio_variance   = self.__portfolio_variance__(covmat)
                 portfolio_volatility = np.sqrt(portfolio_variance)
-                VaR01  = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.01)*portfolio_volatility
-                VaR025 = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.025)*portfolio_volatility
-                ES01   = -1*np.dot(self.weights,subreturns.mean().values) + 1/0.01 * norm.pdf(norm.ppf(0.025))*portfolio_volatility
-
+                if studentt_dof == None:
+                    # Use normal distribution
+                    VaR01  = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.01)*portfolio_volatility
+                    VaR025 = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.025)*portfolio_volatility
+                    ES01   = -1*np.dot(self.weights,subreturns.mean().values) + 1/0.01 * norm.pdf(norm.ppf(0.025))*portfolio_volatility
+                else:
+                    # Use student-t distribution
+                    VaR01  = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.01)*portfolio_volatility * np.sqrt(studentt_dof / (studentt_dof-2))
+                    VaR025 = -1*np.dot(self.weights,subreturns.mean().values) + norm.ppf(1-0.025)*portfolio_volatility * np.sqrt(studentt_dof / (studentt_dof-2))
+                    ES01   = -1*np.dot(self.weights,subreturns.mean().values) + 1/0.01 * norm.pdf(norm.ppf(0.025))*portfolio_volatility * np.sqrt(studentt_dof / (studentt_dof-2))
                 # Prediction data
-                pred_date = self.returns.iloc[iloc1+estimation_period:iloc1+estimation_period+1].index[-1]
+                pred_date = self.returns.iloc[iloc1+estimation_period:iloc1+estimation_period+2].index[-1]
                 predictions.loc[pred_date] = [VaR01,VaR025,ES01]
 
         if theta:
@@ -152,23 +158,22 @@ class VaR_Predictor():
             subreturns = self.returns.iloc[0:estimation_period]
             # Do we want to exclude stressed periods?
             if exclude_stressed:
-                subreturns = subreturns.drop(self.stressed)
+                subreturns = subreturns.drop([w for w in self.stressed if w in subreturns.index])
             init_covmat = subreturns.cov()
             covmats.append(init_covmat)
-            for iloc1 in range(estimation_period,len(self.returns)-1):
-                # Get the returns
-                subreturns = (self.returns.iloc[iloc1] - self.returns.mean()).values
-                covmat = (1-theta)*covmats[-1] + theta*np.dot(subreturns,subreturns.T)
-                covmats.append(covmat)
-                # Get VaRs and ES estimates for the next day, (so semi-unconditional)
-                portfolio_variance   = self.__portfolio_variance__(covmat)
+
+            for i,(date, X) in enumerate(returns.iloc[estimation_period:].iterrows()):
+                X = X.values
+                X = X - returns.mean().values
+                X = X.reshape(-1,1)
+                covmats.append(theta * covmats[i] + (1-theta) * np.dot(X,X.T))
+                portfolio_variance   = self.__portfolio_variance__(covmats[-1])
                 portfolio_volatility = np.sqrt(portfolio_variance)
                 VaR01  = -1*np.dot(self.weights,self.returns.mean().values) + norm.ppf(1-0.01)*portfolio_volatility
                 VaR025 = -1*np.dot(self.weights,self.returns.mean().values) + norm.ppf(1-0.025)*portfolio_volatility
                 ES01   = -1*np.dot(self.weights,self.returns.mean().values) + 1/0.01 * norm.pdf(norm.ppf(0.025))*portfolio_volatility
-
                 # Prediction data
-                pred_date = self.returns.iloc[iloc1:iloc1+1].index[-1]
+                pred_date = self.returns.iloc[estimation_period+i:i+estimation_period+2].index[-1]
                 predictions.loc[pred_date] = [VaR01,VaR025,ES01]
         return predictions
 
@@ -207,7 +212,7 @@ class VaR_Predictor():
             
             VaR01  = -1*np.percentile(portfolio,1)
             VaR025 = -1*np.percentile(portfolio,2.5)
-            ES01   = -1*np.mean(portfolio[portfolio<VaR01])
+            ES01   = -1*np.mean(portfolio[portfolio<-1*VaR01])
 
             # Prediction data
             pred_date = self.returns.iloc[time_iter:time_iter+timeframe+1].index[-1]
@@ -215,7 +220,7 @@ class VaR_Predictor():
         return predictions
 
 
-    def __DCCC__(self, estimation_period=2*252, exclude_stressed=False):
+    def __CCC__(self, estimation_period=2*252, exclude_stressed=False):
         """Dynamic Constant Correlation method.
            Estimate GARCH(1,1) for each asset, estimate correlation matrix and obtain covariance matrix by using
            volatilities sigma from GARCH and correlations from fixed correlation matrix
@@ -225,49 +230,50 @@ class VaR_Predictor():
                                     'ES01'  :np.zeros(len(self.returns))*np.nan,
                                     'Date'  :self.returns.index}).set_index('Date')
 
-        # Use trailing window covariance matrices
-        for iloc1 in range(0,len(self.returns)-estimation_period):
-            # Get the returns
-            subreturns = self.returns.iloc[iloc1:iloc1+estimation_period]
-            # Do we want to exclude stressed periods?
-            if exclude_stressed:
-                subreturns = subreturns.drop([w for w in self.stressed if w in subreturns.index])
-            residuals    = pd.DataFrame(index=subreturns.index)
-            volatilities = pd.DataFrame(index=subreturns.index)
-            for i,asset in enumerate(self.stocks):
-                ret = subreturns[asset].dropna()
-                dates = ret.index
-                ret = ret.values.flatten()
-                # Scaling to improve GARCH estimation
-                C = 3
-                ret = ret * 10**C
-                # Fit constant mean GARCH(1,1) model
-                am = arch_model(ret, p=1,q=1)
-                res = am.fit(update_freq=0,)
-                # Get conditional volatilities
-                volas = res.conditional_volatility
-                # Estimate empirical distribution of zt
-                zt = (ret-ret.mean()) / volas
-                residuals.loc[dates,asset] = zt
-                volatilities.loc[dates,asset] = volas
+        # Estimate constant correlation matrix using GARCH
+        subreturns = self.returns
+        # Do we want to exclude stressed periods?
+        if exclude_stressed:
+            subreturns = subreturns.drop([w for w in self.stressed if w in subreturns.index])
+        residuals    = pd.DataFrame(index=subreturns.index)
+        volatilities = pd.DataFrame(index=subreturns.index)
+        fitted_models = {}
+        for i,asset in enumerate(self.stocks):
+            ret = subreturns[asset].dropna()
+            dates = ret.index
+            ret = ret.values.flatten()
+            # Scaling to improve GARCH estimation
+            C = 3
+            ret = ret * 10**C
+            # Fit constant mean GARCH(1,1) model
+            am = arch_model(ret, p=1,q=1)
+            res = am.fit(update_freq=0,)
+            # Get conditional volatilities
+            volas = res.conditional_volatility
+            # Estimate empirical distribution of zt
+            zt = (ret-ret.mean()) / volas
+            residuals.loc[dates,asset] = zt
+            volatilities.loc[dates,asset] = volas
+            fitted_models[asset] = res
 
-            # Estimate fixed correlation matrix
-            cons_corrmat = residuals.corr()
-
-            # Predict volatility for the next day
-            sigma_pred = np.sqrt(res.params['omega'] + res.params['alpha[1]']*(10**3)*subreturns.iloc[-1]**2 + res.params['beta[1]']*volatilities.iloc[-1]**2)/10**C
-            # Estimate covariance matrix
-            CCC_covmat = corr_to_cov(cons_corrmat, sigma_pred)
-            
-            # Now we use variance-covariance method to estimate VaR and ES
+        # Estimate fixed correlation matrix
+        cons_corrmat = residuals.corr()
+        # Use volatilities from GARCH to estimate VaRs
+        for date,returns in self.returns.iloc[:-1].iterrows():
+            # predict volatility one day ahead
+            omegas = np.array([fitted_models[w].params['omega'] for w in self.stocks])
+            alphas = np.array([fitted_models[w].params['alpha[1]'] for w in self.stocks])
+            betas = np.array([fitted_models[w].params['beta[1]'] for w in self.stocks])
+            pred_vola = np.sqrt(omegas+alphas*(returns* 10**C)**2+betas*volatilities.loc[date]**2) / (10**C)
+            CCC_covmat = corr_to_cov(cons_corrmat, pred_vola.values)
             portfolio_variance = self.__portfolio_variance__(CCC_covmat)
+            
             VaR01  = np.sqrt(portfolio_variance) * norm.ppf(1-0.01) - np.dot(self.weights, self.returns.mean())
-            VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025) - np.dot(self.weights, returns.mean())
+            VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025) - np.dot(self.weights, self.returns.mean())
             ES01   = np.sqrt(portfolio_variance) * 1/0.01 * norm.pdf(norm.ppf(0.01)) - np.dot(self.weights, self.returns.mean())
             # Prediction data
-            pred_date = self.returns.iloc[iloc1+estimation_period:iloc1+estimation_period+1].index[-1]
+            pred_date = self.returns.loc[date:].index[1]
             predictions.loc[pred_date] = [VaR01,VaR025,ES01]
-
         return predictions
 
     def __historic_simulation__(self, timeframe = 2*252):
@@ -283,31 +289,29 @@ class VaR_Predictor():
             portfolio = np.dot(self.weights, subreturns.T)
             VaR01  = -1*np.percentile(portfolio,1)
             VaR025 = -1*np.percentile(portfolio,2.5)
-            ES01   = -1*np.mean(portfolio[portfolio<VaR01])
+            ES01   = -1*np.mean(portfolio[portfolio<-1*VaR01])
 
             # Prediction data
             pred_date = self.returns.iloc[time_iter:time_iter+timeframe+1].index[-1]
             predictions.loc[pred_date] = [VaR01,VaR025,ES01]
-        return predictions        
+        return predictions
 
 
     def __combine__(self):
         # Variance - covariance method
         output = {}
         #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
-        #output['VarCovar theta including stressed'] = self.__var_covar__(theta=0.04)
+        #output['VarCovar theta including stressed'] = self.__var_covar__()
         #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
         #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        #output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
+        #output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
+        #output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
+        #output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
         #output['Historic simulation'] = self.__historic_simulation__()
         #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
-        #output['FHS'] = self.__FHS__()
-        #output['Dynamic Constant correlation method'] = self.__DCCC__(exclude_stressed=False)
-
-        #plt.plot(output['VarCovar Normal Covmat including stressed']['VaR01'],lw=1)
-        #plt.plot(output['VarCovar Normal Covmat excluding stressed']['VaR01'],lw=1)
-        #plt.plot(output['VarCovar Ledoit Wolf including stressed']['VaR01'],lw=1)
-        #plt.plot(output['VarCovar theta including stressed']['VaR01'],lw=1)
-        #plt.show()
+        output['FHS'] = self.__FHS__()
+        #output['Constant correlation method'] = self.__CCC__(exclude_stressed=False)
         return output
 
 
@@ -355,6 +359,8 @@ class VaR_Analyzer():
         # Count actual number of VaR exceedings
         # Iterate over models
         results = pd.DataFrame({'VaR01 exceedings (#)':[], 'VaR01 exceedings (%)':[], 'VaR 2.5 exceedings (#)':[], 'VaR 2.5 exceedings (%)':[], 'Model':[]}).set_index('Model')
+        fig, ax = plt.subplots()
+        ax.plot(self.all_VaR01['True losses'],lw=0.2,color='black')
         for model in self.all_VaR01.columns[:-1]:
             exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).sum()
             fraction_exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).mean()*100
@@ -362,6 +368,9 @@ class VaR_Analyzer():
             exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).sum()
             fraction_exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).mean()*100
             results.loc[model] = [exceedings01, fraction_exceedings01, exceedings025, fraction_exceedings025]
+            ax.plot(self.all_VaR01[model],label=model,lw=0.8)
+        plt.legend(loc='best',frameon=1)
+        plt.show()
         print(results)
 
         # Now do hypothesis testing
@@ -377,7 +386,29 @@ class VaR_Analyzer():
         results['VaR01 exceedings (#)'] = results['VaR01 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval01]
         results['VaR 2.5 exceedings (#)'] = results['VaR 2.5 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval025]
         print(results)
-        
+
+    def __score_ES__(self):
+        """Function to score the ES estimations"""
+        # Count actual number of VaR exceedings
+        # Iterate over models
+        results = pd.DataFrame({'True ES01':[], 'Expected ES01':[], 't stat difference':[], 'p-value':[], 'Model':[]}).set_index('Model')
+        #fig, ax = plt.subplots()
+        #ax.plot(self.all_VaR01['True losses'],lw=0.2,color='black')
+        for model in self.all_ES01.columns[:-1]:
+            losses = self.all_ES01['True losses']
+            TrueVaR01 = np.percentile(losses,99)
+            TrueES01 = np.mean(losses[losses>TrueVaR01])
+            std_ES01 = np.std(losses[losses>TrueVaR01])
+            ES_hat = self.all_ES01[model].mean()
+            #ES_std = self.all_ES01[model].std()
+            ES_N   = self.all_ES01[model].count()
+            # Hypothesis testing
+            t_stat = np.abs(TrueES01-ES_hat) / std_ES01
+            pval = np.round(1-norm.cdf(t_stat),2)
+            results.loc[model] = [TrueES01, ES_hat, t_stat,pval]
+        print(results)
+
+
 
 VaRA = VaR_Analyzer(dictionary,returns)
-VaRA.__score_VaR__()
+VaRA.__score_ES__()

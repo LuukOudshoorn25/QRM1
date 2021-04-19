@@ -47,13 +47,15 @@ def plot_timeseries(df):
     plt.savefig('Prices.pdf',bbox_inches='tight')
 
 
-def qq_plot(returns):
+def qq_plot(returns, dist='normal',nu=None):
     stocks = returns.columns
     def order(data, sample_size):
         qq = np.ones([sample_size, 2])
         np.random.shuffle(data)
         qq[:, 0] = np.sort(data[0:sample_size])
         qq[:, 1] = np.sort(np.random.normal(size = sample_size))
+        if dist == 't':
+            qq[:, 1] = np.sort(np.random.standard_t(size = sample_size, df=nu))
         return qq
     
     for stock in stocks:
@@ -63,10 +65,18 @@ def qq_plot(returns):
     plt.xlabel('Theoretical quantiles')    
     plt.ylabel('Sample quantiles')
     plt.legend(frameon=1)
-    plt.plot([-4,4],[-4,4],color='black',lw=0.5,ls='--')
+    #plt.plot([-4,4],[-4,4],color='black',lw=0.5,ls='--')
+    plt.xlim(-7,7)
+    plt.ylim(-7,7)
     plt.tight_layout()
-    plt.savefig('qq_plot.pdf',bbox_inches='tight')
+    plt.savefig('qq_plot'+dist+'.pdf',bbox_inches='tight')
     plt.show()
+    #import scipy.stats as stats
+    #import statsmodels.api as sm
+    #fig,ax=plt.subplots()
+    #for res in returns.columns:
+    #    sm.qqplot(returns[res], stats.t, distargs=(4,),ax=ax,fit=True, line="45")
+    #plt.show()
 
     
 def CDFs(returns):
