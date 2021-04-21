@@ -150,7 +150,7 @@ def load_timeseries_new():
     return joined
 
 
-def test_square_root():
+def test_square_root(returns):
     # Check performance of square root t
     # Step 1: sample 5 day sets of returns
     # Generate sets of 5 random days

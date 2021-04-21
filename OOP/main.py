@@ -382,7 +382,7 @@ class VaR_Analyzer():
         plt.legend(loc='center right',frameon=1,fontsize=7.7)
         plt.savefig('./all_VaR.png', bbox_inches='tight', dpi=500)
         plt.show()
-        print(results)
+        
 
         # Now do hypothesis testing
         num_obs = len(self.all_VaR01)
@@ -396,7 +396,7 @@ class VaR_Analyzer():
         # Place the pvalues in the table
         results['VaR01 exceedings (#)'] = results['VaR01 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval01]
         results['VaR 2.5 exceedings (#)'] = results['VaR 2.5 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval025]
-        print(results)
+        
         return results
 
     def __score_ES__(self):
@@ -418,7 +418,7 @@ class VaR_Analyzer():
             t_stat = np.abs(TrueES01-ES_hat) / std_ES01
             pval = np.round(1-norm.cdf(t_stat),2)
             results.loc[model] = [TrueES01, ES_hat, t_stat,pval]
-        print(results)
+        
         return results
 
 
@@ -569,4 +569,4 @@ print(VaR_ES.round(3).to_latex(bold_rows=True))
 ##################################################
 #               Square root testing              #
 ##################################################
-test_square_root()
+test_square_root(returns)
