@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from sklearn import cluster, datasets, mixture
 from scipy.stats import multivariate_normal,kstest,norm,t
 from scipy.interpolate import interp1d
+from scipy.stats import kurtosis, skew
 from scipy.special import erf
 from joblib import Parallel, delayed
 from scipy.optimize import minimize
@@ -43,34 +44,31 @@ plt.style.use('stylesheet')
 
 # Start of actual code...
 
-df = load_timeseries()
-# df now contains both US3month yields (for cash account) and SP500 bond
-# We can choose what to use
-use = 'bonds'
-if use =='cash':
-    # Estimate value of cash portfolio
-    cashaccount = np.cumprod((1+df.US3month/25200))
-    df['US3month'] = cashaccount
-    # Give new name in dataframe
-    df = df.rename({'US3month':'Cash'},axis=1)
-    df = df.drop('SP500_bond',axis=1)
-if use=='bonds':
-    df = df.drop('US3month',axis=1)
-# Sort according to return for plotting purposes
-df = df[((df/df.iloc[0]).iloc[-1]).sort_values(ascending=False).index].astype(float)
-# Plot timeseries
-#plot_timeseries(df)
+returns = load_timeseries_new()
+stocks = ['Europe Equity',
+          'France All Maturities',
+          'AEX',
+          'Bist EUR',
+          'Commodities EUR',
+          'US CMBL EUR',
+          'Nasdaq EUR',
+          'Emerging equity EUR']
+# Make summary table
+summary_df = pd.DataFrame({'Annualized mean return':returns.mean()*252*100,
+                           'Annualized volatility': returns.std()*np.sqrt(252)*100,
+                           'Kurtosis':kurtosis(returns),
+                           'Skewness':skew(returns)})
+print(summary_df.round(1).sort_index().to_latex(bold_rows=True))
 
+# Plot
+plot_timeseries(returns[stocks])
 # Do some testing for normality assumptions
-# Convert prices to log returns
-DC = dataconversion()
-returns = DC.to_log_ret(df)
-stocks = returns.columns
+
 # Make QQ plot
-#qq_plot(returns, dist='normal')
-#qq_plot(returns, dist='t',nu=4.5)
+#qq_plot(returns[stocks], dist='normal')
+#qq_plot(returns[stocks], dist='t',nu=4.5)
 # Make CDF plots
-#CDFs(returns)
+#CDFs(returns[stocks[:6]])
 
 # Do the actual VaR and ES estimation 
 class VaR_Predictor():
@@ -80,13 +78,15 @@ class VaR_Predictor():
             using different techniques"""
         # Set returns as attribute such that we can use it througout the class
         self.returns = returns
-        self.stocks  = returns.columns
+        self.stocks  = stocks
+        #self.weights = np.array([0,1,0,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1])
+        #self.weights = self.weights/np.sum(self.weights)
+        self.weights = np.ones(8)/8
         self.stressed = self.__stressed_periods()
-        self.weights = np.ones(6)/6
 
-    def __portfolio_returns__(self,weights = np.ones(6)/6):
+    def __portfolio_returns__(self):
         """Get returns of the portfolio instead of individual assets"""
-        portfolio = pd.Series(np.dot(weights,self.returns.T),index=self.returns.index)
+        portfolio = pd.Series(np.dot(self.weights,self.returns.T),index=self.returns.index)
         return portfolio
 
     def __portfolio_variance__(self, covmat):
@@ -162,9 +162,9 @@ class VaR_Predictor():
             init_covmat = subreturns.cov()
             covmats.append(init_covmat)
 
-            for i,(date, X) in enumerate(returns.iloc[estimation_period:].iterrows()):
+            for i,(date, X) in enumerate(self.returns.iloc[estimation_period:].iterrows()):
                 X = X.values
-                X = X - returns.mean().values
+                X = X - self.returns.mean().values
                 X = X.reshape(-1,1)
                 covmats.append(theta * covmats[i] + (1-theta) * np.dot(X,X.T))
                 portfolio_variance   = self.__portfolio_variance__(covmats[-1])
@@ -313,11 +313,11 @@ class VaR_Predictor():
         output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
         output['FHS'] = self.__FHS__()
         output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
-        output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
+        #output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
         return output
 
 
-VaRP = VaR_Predictor(returns)
+VaRP = VaR_Predictor(returns[stocks])
 # Get set of different estimated VaR/ES
 dictionary = VaRP.__combine__()
 
@@ -362,7 +362,7 @@ class VaR_Analyzer():
         # Iterate over models
         results = pd.DataFrame({'VaR01 exceedings (#)':[], 'VaR01 exceedings (%)':[], 'VaR 2.5 exceedings (#)':[], 'VaR 2.5 exceedings (%)':[], 'Model':[]}).set_index('Model')
         fig, ax = plt.subplots(figsize=(7,2.8))
-        ax.plot(self.all_VaR01['True losses'],lw=0.4,color='black')
+        ax.plot(100*self.all_VaR01['True losses'],lw=0.4,color='black')
         for model in self.all_VaR01.columns[:-1]:
             exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).sum()
             fraction_exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).mean()*100
@@ -370,13 +370,12 @@ class VaR_Analyzer():
             exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).sum()
             fraction_exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).mean()*100
             results.loc[model] = [exceedings01, fraction_exceedings01, exceedings025, fraction_exceedings025]
-            ax.plot(self.all_VaR01[model],label=model,lw=0.8)
-        #plt.legend(loc='best',frameon=1)
+            ax.plot(100*self.all_VaR01[model],label=model,lw=0.8)
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.ylabel('Loss (VaR) [%]')
         plt.xlabel('Date')
-        plt.ylim(-0.02,0.12)
+        plt.ylim(-0.02*100,100*0.12)
         plt.xlim(pd.to_datetime('2013',format='%Y'),pd.to_datetime('2028',format='%Y'))
         plt.legend(loc='center right',frameon=1,fontsize=7.7)
         plt.savefig('./all_VaR.png', bbox_inches='tight', dpi=500)
@@ -422,10 +421,140 @@ class VaR_Analyzer():
 
 
 
-VaRA = VaR_Analyzer(dictionary,returns)
+VaRA = VaR_Analyzer(dictionary,returns[stocks])
 VaR_results = VaRA.__score_VaR__()
 ES_results  = VaRA.__score_ES__()
 
 print(VaR_results.round(3).to_latex(bold_rows=True)) 
 
 print(ES_results.to_latex(bold_rows=True)) 
+
+
+##################################################
+#                 Stress testing                 #
+##################################################
+
+class stress():
+    def __init__(self, returns):
+        self.returns = returns
+        Nsims = 2000000
+        self.Npaths = 5000
+        # Sample random draws
+        days = np.random.randint(low=0,high=len(returns),size=(Nsims,252))
+        self.days = days
+        # Get paths
+        self.__rvs__()
+        # Set weights
+        # Note, now not 8 weights, but all since we take complete dataframe with us
+        # that is needed to get correct correlation structure
+        weights = np.array([0,1,0,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1])
+        self.weights = weights/np.sum(weights)
+
+
+    def __rvs__(self):
+        # Sample returns from all indices needed for shocks
+        self.rvs = {'Nasdaq':self.returns['Nasdaq'].values[self.days],
+                    'USD'   :self.returns['DEXUSEU'].values[self.days],
+                    'TRY'   :self.returns['TRY'].values[self.days],
+                    'Commos':self.returns['Commodities'].values[self.days],
+                    'Yield':self.returns['Treasury5y'].values[self.days]}                 
+        # Get terminal values in the simulations
+        # Note: exponents for indices, commodities and FX, sum for rates!
+        self.terminal = {'Nasdaq':np.exp(np.sum(self.rvs['Nasdaq'],axis=1))-1,
+                         'USD'   :np.exp(np.sum(self.rvs['USD'],axis=1))-1,
+                         'TRY'   :np.exp(np.sum(self.rvs['TRY'],axis=1))-1,
+                         'Commos':np.exp(np.sum(self.rvs['Commos'],axis=1))-1,
+                         'Yield':np.sum(self.rvs['Yield'],axis=1)}
+
+
+    def __scenarios__(self,riskfactor,change):
+        """risk factor can be 
+        Nasdaq
+        USD
+        TRY
+        Commos
+        Yield
+        Change should be fraction loss (eg -0.2 for 20% loss) of change for yield (eg 2 for 2% increase)
+        """
+        scenarios = np.argsort(np.abs(self.terminal[riskfactor]-change))[:self.Npaths]
+        return scenarios
+
+    def __portfolio_loss__(self,scenarios, plot=False,fname=None):
+        bins = np.arange(-75,75,1.5)
+        portfolios = np.zeros((len(self.weights),*self.days[scenarios].shape))
+        for i,risk_factor in enumerate(self.returns.columns):
+            returns = self.returns[risk_factor].values[self.days][scenarios]
+            portfolios[i,:,:] = returns
+        portfolio = np.dot(self.weights, portfolios.swapaxes(1,0))
+        portfolio = np.exp(np.sum(portfolio,axis=1))
+        portfolio_loss = 1-portfolio
+        if plot:
+            plt.hist(100*portfolio_loss,label='Portfolio loss',histtype='step',bins=bins, density=True,)
+            plt.xlim(-80,105)
+            plt.xlabel('Loss (%)')
+            plt.legend(frameon=1,loc='upper right')
+            plt.tight_layout()
+            if fname:
+                plt.savefig(fname)
+            plt.show()
+        # Get VaR
+
+        VaR01 = np.percentile(portfolio_loss,99)
+        VaR025 = np.percentile(portfolio_loss,97.5)
+        ES01 = np.mean(portfolio_loss[portfolio_loss>VaR01])
+        return VaR01,VaR025, ES01, portfolio_loss
+    
+    def __conditionals__(self,scenarios,fname=None):
+        bins = np.arange(-75,75,1.5)
+        for stock in stocks:
+            plt.hist(100-100*np.exp(np.sum(self.returns[stock].values[self.days][scenarios],axis=1)),histtype='step',bins=bins, density=True,label=stock)
+        plt.xlim(-80,105)
+        plt.xlabel('Loss (%)')
+        plt.legend(frameon=1,loc='upper right')
+        plt.tight_layout()
+        if fname:
+            plt.savefig(fname)
+        plt.show()
+    
+
+    
+
+MyStress = stress(returns)
+VaR_ES = pd.DataFrame({'Scenario':[],'VaR01':[], 'VaR025':[], 'ES01':[], 'Mean loss (gain)':[]}).set_index('Scenario')
+loss_distributions = {}
+for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'),
+                                            ('Nasdaq',0.2, 'Rise in equities'),
+                                            ('Nasdaq',-0.4, 'Large drop in equities'),
+                                            ('Nasdaq',0.4, 'Large rise in equities'),
+                                            ('USD',0.1, 'Increase in USD'),
+                                            ('USD',-0.1, 'Decrease in USD'),
+                                            ('TRY',0.2, 'Increase in TRY'),
+                                            ('TRY',-0.2, 'Decrease in TRY'),
+                                            ('Commos',0.2, 'Increase in commos'),
+                                            ('Commos',-0.2, 'Decrease in commos'),
+                                            ('Yield',2, 'Rising yield'),
+                                            ('Yield',-2, 'Decreasing yield')]:
+    scenarios = MyStress.__scenarios__(risk_driver,change)
+    # Get resulting VaR, ES and loss distributions
+    VaR01,VaR025,ES01,loss = MyStress.__portfolio_loss__(scenarios)
+    VaR_ES.loc[scenario_name] = [VaR01,VaR025,ES01, np.mean(loss)]
+    loss_distributions  [scenario_name] = loss
+    print('Done with ',scenario_name)
+
+base_scenario = np.random.randint(0,2000000,10000)
+VaR01,VaR025,ES01,loss = MyStress.__portfolio_loss__(base_scenario)
+
+
+for scenario in ['Drop in equities','Rising yield','Increase in USD','Decrease in TRY', 'Large rise in equities']:
+    bins = np.arange(-75,75,1.5)
+    plt.hist(loss_distributions[scenario]*100,histtype='step',bins=bins, density=True,label=scenario)
+plt.xlim(-60,60)
+plt.xlabel('Loss (%)')
+plt.ylabel('Density')
+plt.legend(frameon=1,loc='lower right')
+plt.tight_layout()
+plt.savefig('Portfolio_losses_scenarios.pdf')
+plt.show()
+
+
+print(VaR_ES.round(3).to_latex(bold_rows=True)) 

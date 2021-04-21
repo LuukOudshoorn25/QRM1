@@ -97,3 +97,54 @@ class dataconversion():
         log_ret = np.log(df/df.shift(1))
         return log_ret.iloc[1:,:]
     
+
+def load_timeseries_new():
+    try:
+        joined = pd.read_pickle('All_timeseries.pickle')
+    except:
+        df = pd.read_pickle('./timeseries/indices.pickle')
+        # Load US treasuries
+        UST5 = pd.read_excel('./timeseries/treasury_5y.xls',header=None)
+        UST5.columns = ['Date','Treasury5y']
+        UST5.Date = pd.to_datetime(UST5.Date)
+        UST5 = UST5.set_index('Date')
+        UST5 = UST5.diff()
+        # Load AEX
+        aex = pd.read_csv('./timeseries/AEX.csv')
+        aex['Date'] = pd.to_datetime(aex['Date'])
+        aex=  aex.set_index('Date')
+        aex = aex[['Close']]
+        aex.columns = ['AEX']
+        aex = np.log(aex/aex.shift(1)).dropna()
+        # Load EUR/USD
+        EUR_USD = pd.read_excel('./timeseries/EUR_USD.xls')
+        EUR_USD.observation_date = pd.to_datetime(EUR_USD.observation_date)
+        EUR_USD = EUR_USD.set_index('observation_date')
+        EUR_USD = np.log(EUR_USD/EUR_USD.shift(1))
+        # Load EUR/Turkish Lira
+        EUR_TRY = pd.read_excel('./timeseries/EUR_TRY.xlsx')
+        EUR_TRY.Date = pd.to_datetime(EUR_TRY.Date)
+        EUR_TRY = EUR_TRY.set_index('Date')['TRY']
+        EUR_TRY = np.log(EUR_TRY/EUR_TRY.shift(1))
+        EUR_TRY = EUR_TRY.dropna()
+        # Load BIST (turkish stock index)
+        bist = pd.read_csv('./timeseries/bist_all_shares.csv')
+        bist['Date'] = pd.to_datetime(bist['Date'])
+        bist=  bist.set_index('Date')
+        bist = bist[['Close']]
+        bist.columns = ['Bist']
+        bist = np.log(bist/bist.shift(1))
+        bist['Bist'].loc['2020-07-27'] = bist['Bist'].mean()
+        # Join all
+        joined = df.join(EUR_USD).join(EUR_TRY).join(bist).join(UST5).join(aex)
+        joined = joined.dropna()
+        joined = joined.loc['2011':]
+        # Convert to EUR
+        joined['Bist EUR'] = joined['Bist'] + joined['TRY']
+        joined['Commodities EUR'] = joined['Commodities'] + joined['DEXUSEU']
+        joined['US CMBL EUR'] = joined['US CMBL'] + joined['DEXUSEU']
+        joined['Nasdaq EUR'] = joined['Nasdaq'] + joined['DEXUSEU']
+        joined['Emerging equity EUR'] = joined['Emerging equity'] + joined['DEXUSEU']
+        joined['Private Debt EUR'] = joined['Private Debt'] + joined['DEXUSEU']
+        joined.to_pickle('All_timeseries.pickle')
+    return joined
