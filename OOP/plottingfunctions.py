@@ -38,13 +38,16 @@ Ncores=6
 plt.style.use('stylesheet')
 
 
-def plot_timeseries(df):
+def plot_timeseries(returns):
     # First plot of all timeseries
-    (df / df.iloc[0]*100).plot(lw=1)
+    df = np.exp(np.cumsum(returns,axis=0))
+    df.plot(lw=0.8)
     plt.legend(frameon=1)
     plt.ylabel('Normalized stock index price')
+    plt.axhline(1,ls='--',color='grey',lw=0.5)
     plt.tight_layout()
     plt.savefig('Prices.pdf',bbox_inches='tight')
+    plt.show()
 
 
 def qq_plot(returns, dist='normal',nu=None):
@@ -66,8 +69,8 @@ def qq_plot(returns, dist='normal',nu=None):
     plt.ylabel('Sample quantiles')
     plt.legend(frameon=1)
     #plt.plot([-6,6],[-6,6],color='black',lw=0.5,ls='--')
-    plt.xlim(-7,7)
-    plt.ylim(-7,7)
+    plt.xlim(-5.5,5.5)
+    plt.ylim(-5.5,5.5)
     plt.tight_layout()
     plt.savefig('qq_plot'+dist+'.pdf',bbox_inches='tight')
     plt.show()
@@ -103,4 +106,51 @@ def CDFs(returns):
     #axes[-1].axis('off')
     plt.tight_layout()
     plt.savefig('CDF_comparison.pdf', bbox_inches='tight')
+    plt.show()
+
+
+
+def EWMA_GARCH(returns):
+    # Filtered historic simulation with EWMA
+    from arch import arch_model
+    fig,axes = plt.subplots(2,3,figsize=(6,4),sharex=True)
+    axes=axes.flatten()
+    residuals    = pd.DataFrame(index=returns.index)
+    volatilities = pd.DataFrame(index=returns.index)
+    for i,asset in enumerate(returns.columns):
+        ret = returns[asset].dropna()
+        dates = ret.index
+        ret = ret.values.flatten()
+        # Scaling to improve GARCH estimation
+        C = 4
+        ret = ret * 10**C
+        # Fit constant mean GARCH(1,1) model
+        am = arch_model(ret, p=1,q=1)
+        res = am.fit(update_freq=0,)
+        # Get conditional volatilities
+        volas = res.conditional_volatility/1e4
+        # Estimate empirical distribution of zt
+        zt = (ret-ret.mean()) / volas
+        axes[i].set_title(returns.columns[i], y=0.8)
+        axes[i].plot(dates,np.sqrt(252)*100*volas,color='black',lw=0.5,label='GARCH')
+        # EWMA
+        EWMA_var = np.zeros(len(ret))
+        EWMA_var[:50] = returns[asset].iloc[:50].var()*1e8
+        for j in range(50,len(ret)):
+            EWMA_var[j] = 0.94 * EWMA_var[j-1] + (1-0.94)*ret[j-1]**2
+        EWMA_var = EWMA_var/1e8
+        axes[i].plot(dates,np.sqrt(252)*100*np.sqrt(EWMA_var),color='tomato',lw=0.5,label='EWMA')
+        #axes[i].set_ylim(0,0.6)
+        #axes[i].set_xlim(-8,8)
+        #
+    axes[0].legend(frameon=1,loc='center left')
+    for i in [3,4,5]:
+        axes[i].set_xlabel('Date')
+        #axes[i].set_xticklabels(axes[i].get_xticklabels(),rotation=45)
+        plt.setp(axes[i].xaxis.get_majorticklabels(), rotation=45 )
+    for i in [0,3]:
+        axes[i].set_ylabel('Annualized volatility (%)')
+    plt.tight_layout()
+
+    plt.savefig('EWMA_GARCH.pdf',dpi=500)
     plt.show()

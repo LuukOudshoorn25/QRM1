@@ -148,3 +148,56 @@ def load_timeseries_new():
         joined['Private Debt EUR'] = joined['Private Debt'] + joined['DEXUSEU']
         joined.to_pickle('All_timeseries.pickle')
     return joined
+
+
+def test_square_root():
+    # Check performance of square root t
+    # Step 1: sample 5 day sets of returns
+    # Generate sets of 5 random days
+    
+    weights = np.array([0,1,0,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1])
+    weights = weights/np.sum(weights)
+    Ndays = np.arange(5,252,10)
+    onedayVaR = -1*np.percentile(np.dot(weights,returns.T),1)
+    errs = []
+    VaRs = []
+    sq_VaRs = []
+    for day in Ndays:
+        days = np.random.randint(low=0,high=len(returns),size=(50000,day))
+        # Get cumulative returns for these days
+        portfolio = np.dot(weights,returns.T)
+        meanret = np.mean(portfolio)
+        portfolio = portfolio[days]
+        portfolio = np.sum(portfolio,axis=1)
+        # Get empirical VaR
+        VaR = -1*np.percentile(portfolio,1)
+        sq_root_time_VaR = np.sqrt(day) * onedayVaR
+        err = np.abs(VaR - sq_root_time_VaR)
+        
+        errs.append(err)
+        VaRs.append(VaR)
+        sq_VaRs.append(sq_root_time_VaR)
+        
+    plt.figure()
+    plt.scatter(Ndays,errs,s=1,label='Absolute error')
+    plt.scatter(Ndays,VaRs,s=1,label='Empirical N-day VaR')
+    plt.scatter(Ndays,sq_VaRs,s=1,label=r'$\sqrt{N}\times$ VaR')
+    plt.legend(loc='best',frameon=1)
+    plt.xlabel('Time horizon')
+    plt.ylabel('99%-VaR')
+    plt.tight_layout()
+    plt.savefig('Testing_squareroot_rule.pdf')
+    plt.show()
+
+
+def iterate_over_scenarios(loss_distributions):
+    for scenario in ['Drop in equities','Rising yield','Increase in USD','Decrease in TRY', 'Large rise in equities']:
+        bins = np.arange(-75,75,1.5)
+    plt.hist(loss_distributions[scenario]*100,histtype='step',bins=bins, density=True,label=scenario)
+    plt.xlim(-60,60)
+    plt.xlabel('Loss (%)')
+    plt.ylabel('Density')
+    plt.legend(frameon=1,loc='lower right')
+    plt.tight_layout()
+    plt.savefig('Portfolio_losses_scenarios.pdf')
+    plt.show()

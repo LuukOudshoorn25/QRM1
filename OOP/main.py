@@ -65,10 +65,12 @@ plot_timeseries(returns[stocks])
 # Do some testing for normality assumptions
 
 # Make QQ plot
-#qq_plot(returns[stocks], dist='normal')
-#qq_plot(returns[stocks], dist='t',nu=4.5)
+qq_plot(returns[stocks], dist='normal')
+qq_plot(returns[stocks], dist='t',nu=4.5)
 # Make CDF plots
-#CDFs(returns[stocks[:6]])
+CDFs(returns[stocks[2:]])
+# Make GARCH and EWMA plot
+EWMA_GARCH(returns[stocks[2:]])
 
 # Do the actual VaR and ES estimation 
 class VaR_Predictor():
@@ -426,7 +428,6 @@ VaR_results = VaRA.__score_VaR__()
 ES_results  = VaRA.__score_ES__()
 
 print(VaR_results.round(3).to_latex(bold_rows=True)) 
-
 print(ES_results.to_latex(bold_rows=True)) 
 
 
@@ -436,6 +437,7 @@ print(ES_results.to_latex(bold_rows=True))
 
 class stress():
     def __init__(self, returns):
+        """Init function for stress tester. Call with returns dataframe. Set number of simulations and the number of paths per scenario"""
         self.returns = returns
         Nsims = 2000000
         self.Npaths = 5000
@@ -452,6 +454,7 @@ class stress():
 
 
     def __rvs__(self):
+        """Sample from all risk factors the days that we randomly generated. Save as attributed for quick access"""
         # Sample returns from all indices needed for shocks
         self.rvs = {'Nasdaq':self.returns['Nasdaq'].values[self.days],
                     'USD'   :self.returns['DEXUSEU'].values[self.days],
@@ -480,15 +483,21 @@ class stress():
         return scenarios
 
     def __portfolio_loss__(self,scenarios, plot=False,fname=None):
-        bins = np.arange(-75,75,1.5)
+        """Get the portfolio loss distribution in a particular scenario"""
+        # Define array for portfolio values
         portfolios = np.zeros((len(self.weights),*self.days[scenarios].shape))
+        # Iterate over risk factors and save returns
         for i,risk_factor in enumerate(self.returns.columns):
             returns = self.returns[risk_factor].values[self.days][scenarios]
             portfolios[i,:,:] = returns
+        # Get portfolio returns by taking dot product with weights (ie weighted average of returns)
         portfolio = np.dot(self.weights, portfolios.swapaxes(1,0))
-        portfolio = np.exp(np.sum(portfolio,axis=1))
-        portfolio_loss = 1-portfolio
+        # Equate cumulative return
+        portfolio = np.exp(np.sum(portfolio,axis=1))-1
+        # Loss is minus gain
+        portfolio_loss = -portfolio
         if plot:
+            bins = np.arange(-75,75,1.5)
             plt.hist(100*portfolio_loss,label='Portfolio loss',histtype='step',bins=bins, density=True,)
             plt.xlim(-80,105)
             plt.xlabel('Loss (%)')
@@ -505,6 +514,7 @@ class stress():
         return VaR01,VaR025, ES01, portfolio_loss
     
     def __conditionals__(self,scenarios,fname=None):
+        """Plot conditional loss distribution functions for all assets"""
         bins = np.arange(-75,75,1.5)
         for stock in stocks:
             plt.hist(100-100*np.exp(np.sum(self.returns[stock].values[self.days][scenarios],axis=1)),histtype='step',bins=bins, density=True,label=stock)
@@ -520,9 +530,12 @@ class stress():
     
 
 MyStress = stress(returns)
+# Define a dataframe to store the results
 VaR_ES = pd.DataFrame({'Scenario':[],'VaR01':[], 'VaR025':[], 'ES01':[], 'Mean loss (gain)':[]}).set_index('Scenario')
+# This dictionary will contain the loss distribtuions of all scenarios
 loss_distributions = {}
-for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'),
+# Iterate over the scenarios
+for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'), # Define by hand all scenarios!
                                             ('Nasdaq',0.2, 'Rise in equities'),
                                             ('Nasdaq',-0.4, 'Large drop in equities'),
                                             ('Nasdaq',0.4, 'Large rise in equities'),
@@ -538,23 +551,22 @@ for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'),
     # Get resulting VaR, ES and loss distributions
     VaR01,VaR025,ES01,loss = MyStress.__portfolio_loss__(scenarios)
     VaR_ES.loc[scenario_name] = [VaR01,VaR025,ES01, np.mean(loss)]
+    # Save loss distribution
     loss_distributions  [scenario_name] = loss
     print('Done with ',scenario_name)
 
+# Get VaR in base scenario (ie random draw)
 base_scenario = np.random.randint(0,2000000,10000)
 VaR01,VaR025,ES01,loss = MyStress.__portfolio_loss__(base_scenario)
+print('Base scenario has VaR01 of ',VaR01)
+# Plot some of the loss distributions
+iterate_over_scenarios(loss_distributions)
 
-
-for scenario in ['Drop in equities','Rising yield','Increase in USD','Decrease in TRY', 'Large rise in equities']:
-    bins = np.arange(-75,75,1.5)
-    plt.hist(loss_distributions[scenario]*100,histtype='step',bins=bins, density=True,label=scenario)
-plt.xlim(-60,60)
-plt.xlabel('Loss (%)')
-plt.ylabel('Density')
-plt.legend(frameon=1,loc='lower right')
-plt.tight_layout()
-plt.savefig('Portfolio_losses_scenarios.pdf')
-plt.show()
 
 
 print(VaR_ES.round(3).to_latex(bold_rows=True)) 
+
+##################################################
+#               Square root testing              #
+##################################################
+test_square_root()
