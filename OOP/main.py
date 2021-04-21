@@ -300,18 +300,20 @@ class VaR_Predictor():
     def __combine__(self):
         # Variance - covariance method
         output = {}
-        #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
-        #output['VarCovar theta including stressed'] = self.__var_covar__()
-        #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
-        #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
-        #output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
-        #output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
-        #output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
-        #output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
-        #output['Historic simulation'] = self.__historic_simulation__()
-        #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
+        output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
+        output['VarCovar theta including stressed'] = self.__var_covar__()
+        output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
+        output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
+        output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
+        output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
+        output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
+        output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
+        output['Historic simulation'] = self.__historic_simulation__()
+        output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
         output['FHS'] = self.__FHS__()
-        #output['Constant correlation method'] = self.__CCC__(exclude_stressed=False)
+        output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
+        output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
         return output
 
 
@@ -359,8 +361,8 @@ class VaR_Analyzer():
         # Count actual number of VaR exceedings
         # Iterate over models
         results = pd.DataFrame({'VaR01 exceedings (#)':[], 'VaR01 exceedings (%)':[], 'VaR 2.5 exceedings (#)':[], 'VaR 2.5 exceedings (%)':[], 'Model':[]}).set_index('Model')
-        fig, ax = plt.subplots()
-        ax.plot(self.all_VaR01['True losses'],lw=0.2,color='black')
+        fig, ax = plt.subplots(figsize=(7,2.8))
+        ax.plot(self.all_VaR01['True losses'],lw=0.4,color='black')
         for model in self.all_VaR01.columns[:-1]:
             exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).sum()
             fraction_exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).mean()*100
@@ -369,7 +371,15 @@ class VaR_Analyzer():
             fraction_exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).mean()*100
             results.loc[model] = [exceedings01, fraction_exceedings01, exceedings025, fraction_exceedings025]
             ax.plot(self.all_VaR01[model],label=model,lw=0.8)
-        plt.legend(loc='best',frameon=1)
+        #plt.legend(loc='best',frameon=1)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.ylabel('Loss (VaR) [%]')
+        plt.xlabel('Date')
+        plt.ylim(-0.02,0.12)
+        plt.xlim(pd.to_datetime('2013',format='%Y'),pd.to_datetime('2028',format='%Y'))
+        plt.legend(loc='center right',frameon=1,fontsize=7.7)
+        plt.savefig('./all_VaR.png', bbox_inches='tight', dpi=500)
         plt.show()
         print(results)
 
@@ -386,6 +396,7 @@ class VaR_Analyzer():
         results['VaR01 exceedings (#)'] = results['VaR01 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval01]
         results['VaR 2.5 exceedings (#)'] = results['VaR 2.5 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval025]
         print(results)
+        return results
 
     def __score_ES__(self):
         """Function to score the ES estimations"""
@@ -407,8 +418,14 @@ class VaR_Analyzer():
             pval = np.round(1-norm.cdf(t_stat),2)
             results.loc[model] = [TrueES01, ES_hat, t_stat,pval]
         print(results)
+        return results
 
 
 
 VaRA = VaR_Analyzer(dictionary,returns)
-VaRA.__score_ES__()
+VaR_results = VaRA.__score_VaR__()
+ES_results  = VaRA.__score_ES__()
+
+print(VaR_results.round(3).to_latex(bold_rows=True)) 
+
+print(ES_results.to_latex(bold_rows=True)) 

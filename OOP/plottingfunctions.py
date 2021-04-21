@@ -65,7 +65,7 @@ def qq_plot(returns, dist='normal',nu=None):
     plt.xlabel('Theoretical quantiles')    
     plt.ylabel('Sample quantiles')
     plt.legend(frameon=1)
-    #plt.plot([-4,4],[-4,4],color='black',lw=0.5,ls='--')
+    #plt.plot([-6,6],[-6,6],color='black',lw=0.5,ls='--')
     plt.xlim(-7,7)
     plt.ylim(-7,7)
     plt.tight_layout()
