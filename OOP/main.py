@@ -302,19 +302,20 @@ class VaR_Predictor():
     def __combine__(self):
         # Variance - covariance method
         output = {}
-        output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
-        output['VarCovar theta including stressed'] = self.__var_covar__()
-        output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
-        output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
-        output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
-        output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
-        output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
-        output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
-        output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
-        output['Historic simulation'] = self.__historic_simulation__()
-        output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
-        output['FHS'] = self.__FHS__()
-        output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
+        #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
+        #output['VarCovar theta including stressed'] = self.__var_covar__()
+        #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
+        #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        #output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
+        #output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
+        #output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
+        #output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
+        #output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
+        output['Historic simulation 2year'] = self.__historic_simulation__()
+        output['Historic simulation 5year'] = self.__historic_simulation__(5*252)
+        #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
+        #output['FHS'] = self.__FHS__()
+        #output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
         #output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
         return output
 
@@ -442,7 +443,7 @@ class stress():
         Nsims = 2000000
         self.Npaths = 5000
         # Sample random draws
-        days = np.random.randint(low=0,high=len(returns),size=(Nsims,252))
+        days = np.random.randint(low=0,high=len(returns),size=(Nsims,250))
         self.days = days
         # Get paths
         self.__rvs__()
@@ -480,6 +481,7 @@ class stress():
         Change should be fraction loss (eg -0.2 for 20% loss) of change for yield (eg 2 for 2% increase)
         """
         scenarios = np.argsort(np.abs(self.terminal[riskfactor]-change))[:self.Npaths]
+        print('Terminal value in : ',riskfactor,change,np.median(self.terminal[riskfactor][scenarios]))
         return scenarios
 
     def __portfolio_loss__(self,scenarios, plot=False,fname=None):
@@ -570,3 +572,86 @@ print(VaR_ES.round(3).to_latex(bold_rows=True))
 #               Square root testing              #
 ##################################################
 test_square_root(returns)
+
+
+
+
+
+
+
+
+##################################################
+#                Stress testing 2                #
+##################################################
+# Run FHS on all assets
+VaR_ES = pd.DataFrame({'Scenario':[],'VaR01':[], 'VaR025':[], 'ES01':[], 'Mean loss (gain)':[]}).set_index('Scenario')
+residuals    = pd.DataFrame(index=returns.index)
+volas        = pd.DataFrame(index=returns.index)
+sigma_preds = {}
+ewma_lambda = 0.94
+
+for i,asset in enumerate(returns.columns):
+    ret = returns[asset].dropna()
+    dates = ret.index
+    ret = ret.values.flatten()
+    # Estimate EWMA model
+    EWMA_var = np.zeros(len(ret))
+    EWMA_var[:50] = np.var(ret[:50])
+    for j in range(50,len(ret)):
+        EWMA_var[j] = ewma_lambda * EWMA_var[j-1] + (1-ewma_lambda)*ret[j-1]**2
+    EWMA_vol = np.sqrt(EWMA_var)
+    # Predict volatility one day ahead
+    sigma_pred = np.sqrt(ewma_lambda*EWMA_var[-1] + (1-ewma_lambda)*ret[-1]**2)
+    sigma_preds[asset] = sigma_pred
+    # Estimate empirical distribution of zt
+    zt = (ret-ret.mean()) / EWMA_vol
+    # Save residuals
+    residuals.loc[dates,asset] = zt
+    volas.loc[dates,asset] = EWMA_vol
+# Get full correlation matrix in times of stress for that asset
+# e.g. Nasdaq
+mean_vola = volas.mean()
+correlation_factors = {}
+correlation_factors['Nasdaq'] = returns.corr()['Nasdaq']
+correlation_factors['USD'] = returns.corr()['DEXUSEU']
+correlation_factors['TRY'] = returns.corr()['TRY']
+correlation_factors['Commos'] = returns.corr()['Commodities']
+correlation_factors['Yield'] = returns.corr()['Treasury5y']
+
+corrmat = returns.corr()
+
+
+for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'), # Define by hand all scenarios!
+                                            ('Nasdaq',0.2, 'Rise in equities'),
+                                            ('Nasdaq',-0.4, 'Large drop in equities'),
+                                            ('Nasdaq',0.4, 'Large rise in equities'),
+                                            ('USD',0.1, 'Increase in USD'),
+                                            ('USD',-0.1, 'Decrease in USD'),
+                                            ('TRY',0.2, 'Increase in TRY'),
+                                            ('TRY',-0.2, 'Decrease in TRY'),
+                                            ('Commos',0.2, 'Increase in commos'),
+                                            ('Commos',-0.2, 'Decrease in commos'),
+                                            ('Yield',2, 'Rising yield'),
+                                            ('Yield',-2, 'Decreasing yield')]:
+    
+    rd = {'Nasdaq':'Nasdaq',
+          'USD':'DEXUSEU',
+          'TRY':'TRY',
+          'Commos':'Commodities',
+          'Yield':'Treasury5y'}[risk_driver]
+    v = mean_vola#(change/mean_vola[rd])*mean_vola
+    corr_vec = correlation_factors[risk_driver]
+    covmat = corr_to_cov(corrmat, v)
+    weights = np.array([0,1,0,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1])/8
+    meanloss = -np.dot(weights,corr_vec*change)
+    
+    portfolio_variance = np.dot(np.dot(weights.T, covmat), weights)
+    #print(scenario_name,port_vol)
+    VaR01  = np.sqrt(portfolio_variance) * norm.ppf(1-0.01) + meanloss
+    VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025)  + meanloss
+    ES01   = np.sqrt(portfolio_variance) * 1/0.01 * norm.pdf(norm.ppf(0.01))  + meanloss
+    VaR_ES.loc[scenario_name] = [VaR01,VaR025,ES01, meanloss]
+
+VaR_ES
+
+
