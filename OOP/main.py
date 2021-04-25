@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from glob import glob
 from statsmodels.distributions.empirical_distribution import ECDF
 from scipy.stats import norm
+from scipy import stats
 from scipy.special import erf
 import matplotlib.pyplot as plt
 from sklearn import cluster, datasets, mixture
@@ -302,20 +303,20 @@ class VaR_Predictor():
     def __combine__(self):
         # Variance - covariance method
         output = {}
-        #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
-        #output['VarCovar theta including stressed'] = self.__var_covar__()
-        #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
-        #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
-        #output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
-        #output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
-        #output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
-        #output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
-        #output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
+        output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
+        output['VarCovar theta including stressed'] = self.__var_covar__()
+        output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
+        output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
+        output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
+        output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
+        output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
+        output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
         output['Historic simulation 2year'] = self.__historic_simulation__()
-        output['Historic simulation 5year'] = self.__historic_simulation__(5*252)
-        #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
-        #output['FHS'] = self.__FHS__()
-        #output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
+        #output['Historic simulation 5year'] = self.__historic_simulation__(2*252)
+        output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
+        output['FHS'] = self.__FHS__()
+        output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
         #output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
         return output
 
@@ -364,16 +365,33 @@ class VaR_Analyzer():
         # Count actual number of VaR exceedings
         # Iterate over models
         results = pd.DataFrame({'VaR01 exceedings (#)':[], 'VaR01 exceedings (%)':[], 'VaR 2.5 exceedings (#)':[], 'VaR 2.5 exceedings (%)':[], 'Model':[]}).set_index('Model')
+        # Also per year
+        results_py = pd.DataFrame({'Number of days (#)':[], 'VaR01 exceedings (#)':[],  'VaR01 exceedings (%)':[], 'VaR 2.5 exceedings (#)':[], 'VaR 2.5 exceedings (%)':[], 'Model':[], 'Year':[]}).set_index(['Model', 'Year'])
+        timedeltas = {}
         fig, ax = plt.subplots(figsize=(7,2.8))
         ax.plot(100*self.all_VaR01['True losses'],lw=0.4,color='black')
         for model in self.all_VaR01.columns[:-1]:
+            # Count 1% violations
             exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).sum()
             fraction_exceedings01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).mean()*100
-
+            # Count 2.5% violations
             exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).sum()
             fraction_exceedings025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).mean()*100
             results.loc[model] = [exceedings01, fraction_exceedings01, exceedings025, fraction_exceedings025]
+            # Group by year
+            N = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).resample('1Y').count()
+            Nexc01 = (self.all_VaR01['True losses'] >= self.all_VaR01[model]).resample('1Y').sum()
+            Nexc025 = (self.all_VaR025['True losses'] >= self.all_VaR025[model]).resample('1Y').sum()
+            years = N.index.unique()
+            for year in years:
+                results_py.loc[(model,year),:] = [N.loc[year],Nexc01.loc[year], Nexc01.loc[year]/N.loc[year],Nexc025.loc[year], Nexc025.loc[year]/N.loc[year]]
             ax.plot(100*self.all_VaR01[model],label=model,lw=0.8)
+            # Sample time deltas for QQ plot with exponential distribution
+            exceeding025 = self.all_VaR025['True losses'] >= self.all_VaR025[model]
+            # Get index (times) where there is a violation
+            exceeding025 = exceeding025.index[exceeding025]
+            # Get time deltas and save in dictionary
+            timedeltas[model] = np.diff(exceeding025)
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.ylabel('Loss (VaR) [%]')
@@ -398,7 +416,7 @@ class VaR_Analyzer():
         results['VaR01 exceedings (#)'] = results['VaR01 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval01]
         results['VaR 2.5 exceedings (#)'] = results['VaR 2.5 exceedings (#)'].astype(str) + [' ('+str(w)+')' for w in pval025]
         
-        return results
+        return results, results_py, timedeltas
 
     def __score_ES__(self):
         """Function to score the ES estimations"""
@@ -425,11 +443,34 @@ class VaR_Analyzer():
 
 
 VaRA = VaR_Analyzer(dictionary,returns[stocks])
-VaR_results = VaRA.__score_VaR__()
+VaR_results, VaR_results_py, timedeltas = VaRA.__score_VaR__()
 ES_results  = VaRA.__score_ES__()
 
 print(VaR_results.round(3).to_latex(bold_rows=True)) 
 print(ES_results.to_latex(bold_rows=True)) 
+
+
+VaR_results_py = VaR_results_py['VaR 2.5 exceedings (#)'].unstack()
+trading_days = returns.resample('1Y').count().mean(axis=1).astype(int)
+years = [w.year for w in trading_days.index]
+VaR_results_py.loc['Trading Days'] = trading_days
+VaR_results_py.columns= years[2:]
+VaR_results_py.loc['Expected'] = (0.025*VaR_results_py.loc['Trading Days'])
+VaR_results_py = VaR_results_py.astype(int)
+print(VaR_results_py.to_latex(bold_rows=True))
+
+# QQ plots
+fig, axes = plt.subplots(nrows=5,ncols=3, figsize=(8,10))
+axes = axes.flatten()
+for iter_, model in enumerate(timedeltas.keys()):
+    x = (timedeltas[model]/1e9/3600/24).astype(float)
+    res = stats.probplot(x,plot=axes[iter_],dist=stats.expon, fit=True)
+    #ax.scatter(res[0][0], res[0][1],s=1,label=model)
+    axes[iter_].set_title(model)
+axes[-2].axis('off')
+axes[-1].axis('off')
+plt.tight_layout()
+plt.savefig('exponential_QQplots.pdf', bbox_inches='tight')
 
 
 ##################################################
@@ -443,7 +484,7 @@ class stress():
         Nsims = 2000000
         self.Npaths = 5000
         # Sample random draws
-        days = np.random.randint(low=0,high=len(returns),size=(Nsims,250))
+        days = np.random.randint(low=0,high=len(returns),size=(Nsims,252))
         self.days = days
         # Get paths
         self.__rvs__()
@@ -584,7 +625,7 @@ test_square_root(returns)
 #                Stress testing 2                #
 ##################################################
 # Run FHS on all assets
-VaR_ES = pd.DataFrame({'Scenario':[],'VaR01':[], 'VaR025':[], 'ES01':[], 'Mean loss (gain)':[]}).set_index('Scenario')
+VaR_ES2 = pd.DataFrame({'Scenario':[],'VaR01':[], 'VaR025':[], 'ES01':[], 'Mean loss (gain)':[]}).set_index('Scenario')
 residuals    = pd.DataFrame(index=returns.index)
 volas        = pd.DataFrame(index=returns.index)
 sigma_preds = {}
@@ -610,6 +651,7 @@ for i,asset in enumerate(returns.columns):
     volas.loc[dates,asset] = EWMA_vol
 # Get full correlation matrix in times of stress for that asset
 # e.g. Nasdaq
+
 mean_vola = volas.mean()
 correlation_factors = {}
 correlation_factors['Nasdaq'] = returns.corr()['Nasdaq']
@@ -639,19 +681,19 @@ for risk_driver, change, scenario_name in  [('Nasdaq',-0.2, 'Drop in equities'),
           'TRY':'TRY',
           'Commos':'Commodities',
           'Yield':'Treasury5y'}[risk_driver]
-    v = mean_vola#(change/mean_vola[rd])*mean_vola
+    v = (change/mean_vola[rd])*mean_vola/3
     corr_vec = correlation_factors[risk_driver]
     covmat = corr_to_cov(corrmat, v)
     weights = np.array([0,1,0,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1])/8
     meanloss = -np.dot(weights,corr_vec*change)
-    
+    print(scenario_name,meanloss)
     portfolio_variance = np.dot(np.dot(weights.T, covmat), weights)
     #print(scenario_name,port_vol)
     VaR01  = np.sqrt(portfolio_variance) * norm.ppf(1-0.01) + meanloss
     VaR025 = np.sqrt(portfolio_variance) * norm.ppf(1-0.025)  + meanloss
     ES01   = np.sqrt(portfolio_variance) * 1/0.01 * norm.pdf(norm.ppf(0.01))  + meanloss
-    VaR_ES.loc[scenario_name] = [VaR01,VaR025,ES01, meanloss]
+    VaR_ES2.loc[scenario_name] = [VaR01,VaR025,ES01, meanloss]
 
-VaR_ES
+print(VaR_ES2.round(3).to_latex(bold_rows=True))
 
 
