@@ -303,19 +303,19 @@ class VaR_Predictor():
     def __combine__(self):
         # Variance - covariance method
         output = {}
-        #output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
-        #output['VarCovar theta including stressed'] = self.__var_covar__()
-        #output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
-        #output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
-        #output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
-        #output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
-        #output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
-        #output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
-        #output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
-        #output['Historic simulation 2year'] = self.__historic_simulation__()
+        output['VarCovar Ledoit Wolf including stressed'] = self.__var_covar__(theta=None)
+        output['VarCovar theta including stressed'] = self.__var_covar__()
+        output['VarCovar Ledoit Wolf excluding stressed'] = self.__var_covar__(theta=None, exclude_stressed=True)
+        output['VarCovar Normal Covmat including stressed'] = self.__var_covar__(theta=None, covariance_method='normal')
+        output['VarCovar student 3 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=3)
+        output['VarCovar student 4 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4)
+        output['VarCovar student 4 excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=4, exclude_stressed=True)
+        output['VarCovar student 5 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=5)
+        output['VarCovar student 6 including stressed'] = self.__var_covar__(theta=None, covariance_method='normal', studentt_dof=6)
+        output['Historic simulation 2year'] = self.__historic_simulation__()
         #output['Historic simulation 5year'] = self.__historic_simulation__(2*252)
-        #output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
-        #output['FHS'] = self.__FHS__()
+        output['VarCovar Normal Covmat excluding stressed'] = self.__var_covar__(theta=None, covariance_method='normal', exclude_stressed=True)
+        output['FHS'] = self.__FHS__()
         output['Constant correlation method including stressed period'] = self.__CCC__(exclude_stressed=False)
         #output['Constant correlation method excluding stressed period'] = self.__CCC__(exclude_stressed=False)
         return output
@@ -613,6 +613,11 @@ print(VaR_ES.round(3).to_latex(bold_rows=True))
 #               Square root testing              #
 ##################################################
 test_square_root(returns)
+
+
+
+
+
 
 
 
